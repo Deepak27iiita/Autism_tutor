@@ -2,6 +2,15 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { authApi, parseError } from "../services/api";
 
 const AuthContext = createContext(null);
+const HYDRATE_TIMEOUT_MS = 5000;
+
+const withTimeout = (promise, timeoutMs) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("Auth request timed out")), timeoutMs);
+    }),
+  ]);
 
 const normalizeUser = (rawUser) => {
   if (!rawUser) {
@@ -44,7 +53,7 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
-      const me = await authApi.me();
+      const me = await withTimeout(authApi.me(), HYDRATE_TIMEOUT_MS);
       setUser(normalizeUser(me));
     } catch (err) {
       localStorage.removeItem("token");

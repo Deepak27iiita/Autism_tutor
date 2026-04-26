@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API_BASE_URL =
-  process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+  process.env.REACT_APP_API_URL || "http://localhost:4000/api";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -42,6 +42,12 @@ const authApi = {
 const wordsApi = {
   list: async (params = {}) => {
     const { data } = await api.get("/words", { params });
+    return data;
+  },
+  recommended: async (limit = 5) => {
+    const { data } = await api.get("/words/recommended", {
+      params: { limit },
+    });
     return data;
   },
   create: async (payload) => {
@@ -87,6 +93,10 @@ const usersApi = {
 const analyticsApi = {
   getByUser: async (userId) => {
     const { data } = await api.get(`/analytics/${userId}`);
+    return data;
+  },
+  getMlInsights: async (userId) => {
+    const { data } = await api.get(`/analytics/${userId}/ml-insights`);
     return data;
   },
   create: async (payload) => {

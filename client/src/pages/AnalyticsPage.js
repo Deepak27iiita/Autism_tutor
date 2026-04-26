@@ -2,11 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import { analyticsApi, parseError, sessionApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
+const STAGE_ORDER = [
+  "pre-test",
+  "presentation",
+  "recognition",
+  "reading",
+  "spelling",
+  "imitation",
+  "elicitation",
+  "post-test",
+];
+
 const AnalyticsPage = () => {
   const { user } = useAuth();
   const [analytics, setAnalytics] = useState([]);
   const [summary, setSummary] = useState(null);
   const [sessions, setSessions] = useState([]);
+  const [mlInsights, setMlInsights] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -14,14 +26,16 @@ const AnalyticsPage = () => {
     const load = async () => {
       setLoading(true);
       try {
-        const [analyticsData, sessionData] = await Promise.all([
+        const [analyticsData, sessionData, insightsData] = await Promise.all([
           analyticsApi.getByUser(user.id),
           sessionApi.list(),
+          analyticsApi.getMlInsights(user.id),
         ]);
 
         setAnalytics(analyticsData.analytics || []);
         setSummary(analyticsData.summary || null);
         setSessions(sessionData.filter((item) => item.completed));
+        setMlInsights(insightsData || null);
       } catch (err) {
         setError(parseError(err, "Failed to load analytics"));
       } finally {
@@ -56,7 +70,9 @@ const AnalyticsPage = () => {
           ? Math.round((value.correct / value.total) * 100)
           : 0,
       }))
-      .sort((a, b) => a.stage.localeCompare(b.stage));
+      .sort(
+        (a, b) => STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage),
+      );
   }, [sessions]);
 
   return (
@@ -90,6 +106,54 @@ const AnalyticsPage = () => {
           <p>Average Improvement</p>
           <strong>{summary?.averageImprovement ?? 0}%</strong>
         </article>
+        <article className="stat-card">
+          <p>ML Predicted Accuracy</p>
+          <strong>{mlInsights?.predictedAccuracy ?? 0}%</strong>
+        </article>
+      </div>
+
+      <div className="card">
+        <h3>Adaptive Learning Insights</h3>
+        {!mlInsights ? (
+          <p>Insights will appear after session data is available.</p>
+        ) : (
+          <>
+            <p>
+              Recommended animation intensity:{" "}
+              <strong>{mlInsights.recommendedAnimationIntensity}</strong>
+            </p>
+            <p>
+              Model tracked words:{" "}
+              <strong>{mlInsights?.observations?.trackedWords || 0}</strong> |
+              Sessions used:{" "}
+              <strong>{mlInsights?.observations?.trackedSessions || 0}</strong>
+            </p>
+            {(mlInsights.weakWords || []).length > 0 && (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Weak Word ID</th>
+                      <th>Mastery</th>
+                      <th>Accuracy</th>
+                      <th>Avg Attempts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mlInsights.weakWords.slice(0, 5).map((item) => (
+                      <tr key={item.wordId}>
+                        <td>{item.wordId}</td>
+                        <td>{item.mastery}%</td>
+                        <td>{item.accuracy}%</td>
+                        <td>{item.averageAttempts}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       <div className="card">

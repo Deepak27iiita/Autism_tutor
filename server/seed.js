@@ -5,7 +5,7 @@
 
 const mongoose = require('mongoose');
 const Word = require('./models/Word');
-require('dotenv').config();
+require('dotenv').config({ path: __dirname + '/.env' });
 
 const sampleWords = [
   // Animals
@@ -16,7 +16,7 @@ const sampleWords = [
   { word: 'horse', category: 'animals', imageUrl: 'https://images.unsplash.com/photo-1516467508483-a7212febe31a?w=400', difficulty: 'medium', pecsPhase: 1 },
   
   // Food
-  { word: 'apple', category: 'food', imageUrl: 'https://images.unsplash.com/photo-1560806887-1e4cd0b27c6a?w=400', difficulty: 'easy', pecsPhase: 1 },
+  { word: 'apple', category: 'food', imageUrl: 'https://images.unsplash.com/photo-1584306670957-acf935f5033c?w=600&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NHx8YXBwbGUlMjBmcnVpdHxlbnwwfHwwfHx8MA%3D%3D', difficulty: 'easy', pecsPhase: 1 },
   { word: 'banana', category: 'food', imageUrl: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?w=400', difficulty: 'easy', pecsPhase: 1 },
   { word: 'bread', category: 'food', imageUrl: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=400', difficulty: 'easy', pecsPhase: 1 },
   { word: 'milk', category: 'food', imageUrl: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400', difficulty: 'easy', pecsPhase: 1 },
@@ -40,9 +40,9 @@ async function seedDatabase() {
 
     console.log('✅ Connected to MongoDB');
 
-    // Clear existing words (optional - comment out to keep existing)
-    // await Word.deleteMany({});
-    // console.log('🗑️  Cleared existing words');
+    // Clear existing words before re-seeding
+    await Word.deleteMany({});
+    console.log('🗑️  Cleared existing words');
 
     // Insert sample words
     const inserted = await Word.insertMany(sampleWords);

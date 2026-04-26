@@ -13,11 +13,16 @@ const Layout = () => {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div>
-          <h1 className="brand-title">ASD Animated Tutor</h1>
-          <p className="brand-subtitle">
-            Personalized word learning through adaptive stages
-          </p>
+        <div className="brand-row">
+          <div className="brand-mark" aria-hidden="true">
+            AT
+          </div>
+          <div className="brand-copy">
+            <h1 className="brand-title">ASD Animated Tutor</h1>
+            <p className="brand-subtitle">
+              Personalized word learning through adaptive stages
+            </p>
+          </div>
         </div>
         <div className="header-user-block">
           <span className="role-chip">{user?.role || "child"}</span>

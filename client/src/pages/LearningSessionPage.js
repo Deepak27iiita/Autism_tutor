@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
-import {
-  analyticsApi,
-  parseError,
-  sessionApi,
-  wordsApi,
-} from "../services/api";
+import { parseError, sessionApi, wordsApi } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
 const STAGES = [
@@ -18,6 +13,108 @@ const STAGES = [
   "elicitation",
   "post-test",
 ];
+
+const SESSION_WORD_COUNT = 5;
+const RECENT_WORDS_WINDOW = 15;
+const QUIZ_OPTION_COUNT = 4;
+
+const getRecentWordsKey = (userId) => `recentSessionWords:${userId || "guest"}`;
+
+const shuffleArray = (items) => {
+  const cloned = [...items];
+  for (let i = cloned.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [cloned[i], cloned[j]] = [cloned[j], cloned[i]];
+  }
+  return cloned;
+};
+
+const pickWordsForSession = (allWords, recentWordIds) => {
+  const shuffled = shuffleArray(allWords);
+  const recentSet = new Set(recentWordIds || []);
+  const freshWords = shuffled.filter((item) => !recentSet.has(item._id));
+
+  if (freshWords.length >= SESSION_WORD_COUNT) {
+    return freshWords.slice(0, SESSION_WORD_COUNT);
+  }
+
+  const selectedIds = new Set(freshWords.map((item) => item._id));
+  const fallbackWords = shuffled.filter((item) => !selectedIds.has(item._id));
+  return [...freshWords, ...fallbackWords].slice(0, SESSION_WORD_COUNT);
+};
+
+const buildQuestionOptions = (targetWord, catalogWords, sessionWords) => {
+  if (!targetWord) {
+    return [];
+  }
+
+  const normalizedCatalog = (catalogWords || []).filter(
+    (item) => item?._id && item.imageUrl,
+  );
+  const uniqueById = new Map();
+  normalizedCatalog.forEach((item) => {
+    uniqueById.set(item._id, item);
+  });
+
+  const distractors = [];
+  const targetId = targetWord._id;
+
+  const sameCategory = shuffleArray(
+    normalizedCatalog.filter(
+      (item) => item._id !== targetId && item.category === targetWord.category,
+    ),
+  );
+  sameCategory.forEach((item) => {
+    if (distractors.length < QUIZ_OPTION_COUNT - 1) {
+      distractors.push(item);
+    }
+  });
+
+  const remainingPool = shuffleArray(
+    normalizedCatalog.filter(
+      (item) =>
+        item._id !== targetId && !distractors.some((d) => d._id === item._id),
+    ),
+  );
+  remainingPool.forEach((item) => {
+    if (distractors.length < QUIZ_OPTION_COUNT - 1) {
+      distractors.push(item);
+    }
+  });
+
+  if (distractors.length < QUIZ_OPTION_COUNT - 1) {
+    const sessionFallback = shuffleArray(
+      (sessionWords || []).filter(
+        (item) =>
+          item._id !== targetId && !distractors.some((d) => d._id === item._id),
+      ),
+    );
+    sessionFallback.forEach((item) => {
+      if (distractors.length < QUIZ_OPTION_COUNT - 1) {
+        distractors.push(item);
+      }
+    });
+  }
+
+  const options = shuffleArray([targetWord, ...distractors]).slice(
+    0,
+    QUIZ_OPTION_COUNT,
+  );
+
+  // Ensure no duplicates even in fallback-heavy scenarios.
+  const deduped = [];
+  options.forEach((item) => {
+    if (!deduped.some((entry) => entry._id === item._id)) {
+      deduped.push(item);
+    }
+  });
+
+  if (!deduped.some((item) => item._id === targetId)) {
+    deduped[0] = targetWord;
+  }
+
+  return shuffleArray(deduped);
+};
 
 const speak = (text, enabled) => {
   if (!enabled || !window.speechSynthesis || !text) {
@@ -40,6 +137,10 @@ const LearningSessionPage = () => {
   const [error, setError] = useState("");
   const [stageIndex, setStageIndex] = useState(0);
   const [wordIndex, setWordIndex] = useState(0);
+  const [catalogWords, setCatalogWords] = useState([]);
+  const [selectedOptionId, setSelectedOptionId] = useState("");
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
+  const [lastFeedback, setLastFeedback] = useState(null);
   const [finished, setFinished] = useState(false);
   const [stats, setStats] = useState({ correct: 0, total: 0 });
   const stageStartRef = useRef(Date.now());
@@ -50,6 +151,10 @@ const LearningSessionPage = () => {
   const animationIntensity = user?.preferences?.animationIntensity || "medium";
   const soundEnabled = user?.preferences?.soundEnabled ?? true;
   const autoAdvance = user?.preferences?.autoAdvance ?? false;
+  const currentOptions = useMemo(
+    () => buildQuestionOptions(currentWord, catalogWords, words),
+    [currentWord, catalogWords, words, stageIndex, wordIndex],
+  );
 
   useEffect(() => {
     if (!cardRef.current) {
@@ -81,9 +186,24 @@ const LearningSessionPage = () => {
     setFinished(false);
     setIsLoading(true);
     setStats({ correct: 0, total: 0 });
+    setLastFeedback(null);
 
     try {
-      const pickedWords = await wordsApi.list({ limit: 5 });
+      const [allCatalogWords, recommendedWords] = await Promise.all([
+        wordsApi.list(),
+        wordsApi.recommended(SESSION_WORD_COUNT).catch(() => []),
+      ]);
+
+      const sourceWords = recommendedWords.length
+        ? recommendedWords
+        : allCatalogWords;
+
+      const recentWordsKey = getRecentWordsKey(user?.id || user?._id);
+      const recentWordIds = JSON.parse(
+        localStorage.getItem(recentWordsKey) || "[]",
+      );
+
+      const pickedWords = pickWordsForSession(sourceWords, recentWordIds);
 
       if (!pickedWords.length) {
         throw new Error("No words available. Please add words first.");
@@ -96,6 +216,16 @@ const LearningSessionPage = () => {
       });
 
       setWords(pickedWords);
+      setCatalogWords(allCatalogWords);
+      setSelectedOptionId("");
+      setLastFeedback(null);
+
+      const nextRecentWords = [
+        ...pickedWords.map((item) => item._id),
+        ...recentWordIds,
+      ].slice(0, RECENT_WORDS_WINDOW);
+      localStorage.setItem(recentWordsKey, JSON.stringify(nextRecentWords));
+
       setSessionId(created._id);
       setStageIndex(0);
       setWordIndex(0);
@@ -107,47 +237,22 @@ const LearningSessionPage = () => {
     }
   };
 
-  const completeSession = async (nextStats) => {
+  const completeSession = async () => {
     if (!sessionId) {
       return;
     }
 
-    const pre = nextStats.total
-      ? Math.round((nextStats.correct / nextStats.total) * 100)
-      : 0;
-    const post = pre;
-
-    await sessionApi.complete(sessionId, {
-      preTestScore: pre,
-      postTestScore: post,
-    });
-
-    await analyticsApi.create({
-      userId: user.id || user._id,
-      metrics: {
-        wordsLearned: words.length,
-        accuracyRate: post,
-        averageTimePerWord: 8,
-        sessionsCompleted: 1,
-      },
-      animationMetrics: {
-        averageIntensity: animationIntensity,
-      },
-      wordProgress: words.map((word) => ({
-        wordId: word._id,
-        masteryLevel: post,
-        timesPracticed: 1,
-        lastPracticed: new Date(),
-      })),
-    });
+    await sessionApi.complete(sessionId, {});
 
     setFinished(true);
   };
 
   const submitResult = async (correct) => {
-    if (!sessionId || !currentWord) {
+    if (!sessionId || !currentWord || isSubmittingAnswer) {
       return;
     }
+
+    setIsSubmittingAnswer(true);
 
     const timeSpent = Math.max(
       1,
@@ -169,12 +274,13 @@ const LearningSessionPage = () => {
         total: stats.total + 1,
       };
       setStats(nextStats);
+      setLastFeedback(correct ? "correct" : "incorrect");
 
       const isLastStage = stageIndex === STAGES.length - 1;
       const isLastWord = wordIndex === words.length - 1;
 
       if (isLastStage && isLastWord) {
-        await completeSession(nextStats);
+        await completeSession();
         return;
       }
 
@@ -185,17 +291,28 @@ const LearningSessionPage = () => {
         } else {
           setWordIndex((prev) => prev + 1);
         }
+        setSelectedOptionId("");
+        setLastFeedback(null);
         stageStartRef.current = Date.now();
       };
 
-      if (autoAdvance) {
-        setTimeout(advanceStage, 350);
-      } else {
-        advanceStage();
-      }
+      setTimeout(advanceStage, autoAdvance ? 350 : 160);
     } catch (err) {
       setError(parseError(err, "Failed to submit stage result"));
+      setSelectedOptionId("");
+      setLastFeedback(null);
+    } finally {
+      setIsSubmittingAnswer(false);
     }
+  };
+
+  const onSelectOption = async (option) => {
+    if (!currentWord || !option || isSubmittingAnswer) {
+      return;
+    }
+
+    setSelectedOptionId(option._id);
+    await submitResult(option._id === currentWord._id);
   };
 
   const progressText = useMemo(() => {
@@ -222,6 +339,15 @@ const LearningSessionPage = () => {
             {isLoading ? "Starting..." : "Start New Session"}
           </button>
           <span className="helper-text">{progressText}</span>
+          {words.length > 0 && (
+            <span className="helper-text">
+              Live Accuracy:{" "}
+              {stats.total
+                ? Math.round((stats.correct / stats.total) * 100)
+                : 0}
+              %
+            </span>
+          )}
         </div>
       </div>
 
@@ -230,34 +356,50 @@ const LearningSessionPage = () => {
       {sessionId && currentWord && !finished && (
         <article className="card learning-card" ref={cardRef}>
           <div className="stage-pill">{currentStage.toUpperCase()}</div>
-          <h3>{currentWord.word}</h3>
-          <img
-            src={currentWord.imageUrl}
-            alt={currentWord.word}
-            className="learning-image"
-            onError={(event) => {
-              event.currentTarget.src =
-                "https://via.placeholder.com/760x480?text=Image+Unavailable";
-            }}
-          />
+          <h3>Select the correct image: {currentWord.word}</h3>
+          <div className="quiz-grid">
+            {currentOptions.map((option) => (
+              <button
+                key={option._id}
+                type="button"
+                className={`quiz-option ${
+                  selectedOptionId === option._id ? "is-selected" : ""
+                }`}
+                onClick={() => onSelectOption(option)}
+                disabled={isSubmittingAnswer || Boolean(lastFeedback)}
+              >
+                <img
+                  src={option.imageUrl}
+                  alt={option.word}
+                  className="learning-image"
+                  onError={(event) => {
+                    event.currentTarget.src =
+                      "https://via.placeholder.com/760x480?text=Image+Unavailable";
+                  }}
+                />
+                <div className="quiz-option-label">{option.word}</div>
+              </button>
+            ))}
+          </div>
+          {lastFeedback && (
+            <div
+              className={`feedback-banner ${
+                lastFeedback === "correct"
+                  ? "feedback-correct"
+                  : "feedback-wrong"
+              }`}
+            >
+              {lastFeedback === "correct"
+                ? `Correct! ${currentWord.word} was selected.`
+                : `Incorrect. The correct answer was ${currentWord.word}.`}
+            </div>
+          )}
           <p>
             Category: {currentWord.category} • Difficulty:{" "}
             {currentWord.difficulty} • PECS {currentWord.pecsPhase}
           </p>
 
           <div className="row-wrap center">
-            <button
-              className="btn btn-success"
-              onClick={() => submitResult(true)}
-            >
-              Correct
-            </button>
-            <button
-              className="btn btn-danger"
-              onClick={() => submitResult(false)}
-            >
-              Incorrect
-            </button>
             <button
               className="btn btn-secondary"
               onClick={() => speak(currentWord.word, soundEnabled)}
