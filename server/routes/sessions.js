@@ -93,11 +93,11 @@ router.get("/:id", auth, async (req, res) => {
 });
 
 // @route   PUT /api/sessions/:id/results
-// @desc    Add result to session
+// @desc    Add result to session (with server-side spelling validation)
 // @access  Private
 router.put("/:id/results", auth, async (req, res) => {
   try {
-    const { stage, wordId, correct, timeSpent, attempts, animationLevel } =
+    const { stage, wordId, correct, timeSpent, attempts, animationLevel, spokenWord, targetWord } =
       req.body;
 
     const session = await Session.findById(req.params.id);
@@ -109,17 +109,26 @@ router.put("/:id/results", auth, async (req, res) => {
       return res.status(403).json({ message: "Access denied" });
     }
 
+    // Server-side spelling validation for spelling/elicitation stages
+    let isSpellingCorrect = null;
+    let resolvedCorrect = correct;
+    if ((stage === "spelling" || stage === "elicitation") && spokenWord !== undefined && targetWord) {
+      isSpellingCorrect =
+        spokenWord.trim().toLowerCase() === targetWord.trim().toLowerCase();
+      resolvedCorrect = isSpellingCorrect; // override client-sent value for accuracy
+    }
+
     session.results.push({
       stage,
       wordId,
-      correct,
+      correct: resolvedCorrect,
       timeSpent,
       attempts,
       animationLevel,
     });
 
     await session.save();
-    res.json(session);
+    res.json({ session, isSpellingCorrect });
   } catch (error) {
     console.error("Add result error:", error);
     res.status(500).json({ message: "Server error" });

@@ -85,6 +85,10 @@ export const AuthProvider = ({ children }) => {
     setError("");
     try {
       const data = await authApi.register(payload);
+      // Teacher accounts: server returns { pending: true } — no token, no session
+      if (data.pending) {
+        return data; // Let the page handle the pending screen
+      }
       setSession(data.token, data.user);
       return data.user;
     } catch (err) {

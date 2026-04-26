@@ -7,6 +7,8 @@ const RegisterPage = () => {
   const navigate = useNavigate();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingApproval, setPendingApproval] = useState(false);
+  const [pendingMsg, setPendingMsg] = useState("");
   const [formData, setFormData] = useState({
     username: "",
     email: "",
@@ -24,10 +26,15 @@ const RegisterPage = () => {
   const onSubmit = async (event) => {
     event.preventDefault();
     setIsSubmitting(true);
-
     try {
-      await register(formData);
-      navigate("/dashboard", { replace: true });
+      const result = await register(formData);
+      // Teacher accounts return { pending: true } — no token issued
+      if (result?.pending) {
+        setPendingApproval(true);
+        setPendingMsg(result.message);
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
     } catch {
       // Error is handled by context
     } finally {
@@ -35,11 +42,43 @@ const RegisterPage = () => {
     }
   };
 
+  // Pending approval screen
+  if (pendingApproval) {
+    return (
+      <div className="auth-layout">
+        <section className="auth-card" style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "3rem" }}>⏳</div>
+          <h2>Account Pending Approval</h2>
+          <p style={{ marginTop: "0.4rem" }}>{pendingMsg}</p>
+          <div
+            className="pending-notice"
+            style={{ marginTop: "1rem" }}
+          >
+            <p>📧 An admin will review your request and activate your account.</p>
+            <p style={{ marginTop: "0.4rem" }}>Once approved, you can log in normally.</p>
+          </div>
+          <Link className="btn btn-ghost" to="/login" style={{ marginTop: "1rem", display: "inline-block" }}>
+            Back to Login
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-layout">
       <section className="auth-card">
         <h2>Create Account</h2>
         <p>Set up a child, teacher, or admin profile.</p>
+
+        {formData.role === "teacher" && (
+          <div className="pending-notice">
+            <strong>⚠️ Teacher accounts require admin approval.</strong>
+            <p style={{ marginTop: "0.3rem", fontSize: "0.9rem" }}>
+              After registering, your account will be inactive until an administrator activates it.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={onSubmit} className="stack-md">
           <label>
@@ -82,7 +121,7 @@ const RegisterPage = () => {
           <label>
             Role
             <select name="role" value={formData.role} onChange={onChange}>
-              <option value="child">Child</option>
+              <option value="child">Child (Student)</option>
               <option value="teacher">Teacher</option>
               <option value="admin">Admin</option>
             </select>
@@ -95,7 +134,11 @@ const RegisterPage = () => {
             className="btn btn-primary"
             type="submit"
           >
-            {isSubmitting ? "Creating account..." : "Register"}
+            {isSubmitting
+              ? "Creating account…"
+              : formData.role === "teacher"
+              ? "Register (Pending Approval)"
+              : "Register"}
           </button>
         </form>
 

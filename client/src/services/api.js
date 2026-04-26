@@ -16,6 +16,21 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Auto-logout when server returns ACCOUNT_INACTIVE (deactivated mid-session)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (
+      error?.response?.status === 403 &&
+      error?.response?.data?.code === "ACCOUNT_INACTIVE"
+    ) {
+      localStorage.removeItem("token");
+      window.location.href = "/login?reason=inactive";
+    }
+    return Promise.reject(error);
+  }
+);
+
 const parseError = (error, fallbackMessage = "Something went wrong") => {
   const validationErrors = error?.response?.data?.errors;
   if (Array.isArray(validationErrors) && validationErrors.length > 0) {
@@ -105,6 +120,52 @@ const analyticsApi = {
   },
 };
 
+const adminApi = {
+  listUsers: async (role) => {
+    const { data } = await api.get("/admin/users", { params: role ? { role } : {} });
+    return data;
+  },
+  updateRole: async (userId, role) => {
+    const { data } = await api.put(`/admin/users/${userId}/role`, { role });
+    return data;
+  },
+  toggleActive: async (userId, isActive) => {
+    const { data } = await api.put(`/admin/users/${userId}/active`, { isActive });
+    return data;
+  },
+  listAssignments: async () => {
+    const { data } = await api.get("/admin/assignments");
+    return data;
+  },
+  assign: async (teacherId, studentId) => {
+    const { data } = await api.post("/admin/assign", { teacherId, studentId });
+    return data;
+  },
+  unassign: async (assignmentId) => {
+    const { data } = await api.delete(`/admin/assign/${assignmentId}`);
+    return data;
+  },
+  getStats: async () => {
+    const { data } = await api.get("/admin/stats");
+    return data;
+  },
+};
+
+const teacherApi = {
+  getStudents: async () => {
+    const { data } = await api.get("/teacher/students");
+    return data;
+  },
+  getStudentProgress: async (studentId) => {
+    const { data } = await api.get(`/teacher/students/${studentId}/progress`);
+    return data;
+  },
+  updateNotes: async (studentId, notes) => {
+    const { data } = await api.put(`/teacher/students/${studentId}/notes`, { notes });
+    return data;
+  },
+};
+
 export {
   api,
   parseError,
@@ -113,4 +174,6 @@ export {
   sessionApi,
   usersApi,
   analyticsApi,
+  adminApi,
+  teacherApi,
 };

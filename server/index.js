@@ -19,6 +19,8 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/words', require('./routes/words'));
 app.use('/api/sessions', require('./routes/sessions'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/admin', require('./routes/admin'));
+app.use('/api/teacher', require('./routes/teacher'));
 
 // Health check
 app.get('/api/health', (req, res) => {

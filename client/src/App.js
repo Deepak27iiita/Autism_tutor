@@ -9,6 +9,8 @@ import LearningSessionPage from "./pages/LearningSessionPage";
 import WordsPage from "./pages/WordsPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import ProfilePage from "./pages/ProfilePage";
+import AdminPage from "./pages/AdminPage";
+import TeacherPage from "./pages/TeacherPage";
 
 const App = () => {
   return (
@@ -26,7 +28,14 @@ const App = () => {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="learning" element={<LearningSessionPage />} />
+        <Route
+          path="learning"
+          element={
+            <RoleGate allowedRoles={["child"]}>
+              <LearningSessionPage />
+            </RoleGate>
+          }
+        />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route
@@ -34,6 +43,22 @@ const App = () => {
           element={
             <RoleGate allowedRoles={["teacher", "admin"]}>
               <WordsPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="admin"
+          element={
+            <RoleGate allowedRoles={["admin"]}>
+              <AdminPage />
+            </RoleGate>
+          }
+        />
+        <Route
+          path="teacher"
+          element={
+            <RoleGate allowedRoles={["teacher", "admin"]}>
+              <TeacherPage />
             </RoleGate>
           }
         />

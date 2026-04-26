@@ -7,8 +7,8 @@ const { auth } = require('../middleware/auth');
 const router = express.Router();
 
 // Generate JWT token
-const generateToken = (userId) => {
-  return jwt.sign({ userId, role: 'user' }, process.env.JWT_SECRET, {
+const generateToken = (userId, role) => {
+  return jwt.sign({ userId, role }, process.env.JWT_SECRET, {
     expiresIn: '30d',
   });
 };
@@ -39,18 +39,32 @@ router.post(
         return res.status(400).json({ message: 'User already exists' });
       }
 
+      const resolvedRole = role || 'child';
+
+      // Teachers start INACTIVE — must be approved by admin before they can access the system
+      const isActive = resolvedRole === 'teacher' ? false : true;
+
       // Create user
       user = new User({
         username,
         email,
         password,
-        role: role || 'child',
+        role: resolvedRole,
         profile: profile || {},
+        isActive,
       });
 
       await user.save();
 
-      const token = generateToken(user._id);
+      // Don't issue a token for inactive accounts (teachers awaiting approval)
+      if (!isActive) {
+        return res.status(201).json({
+          pending: true,
+          message: 'Your teacher account has been created and is awaiting admin approval. You will be able to log in once an administrator activates your account.',
+        });
+      }
+
+      const token = generateToken(user._id, user.role);
 
       res.status(201).json({
         token,
@@ -99,7 +113,15 @@ router.post(
         return res.status(400).json({ message: 'Invalid credentials' });
       }
 
-      const token = generateToken(user._id);
+      // Block inactive accounts at login with a clear, friendly message
+      if (user.isActive === false) {
+        return res.status(403).json({
+          message: 'Your account is pending admin approval. Please contact your administrator.',
+          code: 'ACCOUNT_INACTIVE',
+        });
+      }
+
+      const token = generateToken(user._id, user.role);
 
       res.json({
         token,

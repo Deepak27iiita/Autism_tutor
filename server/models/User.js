@@ -52,6 +52,14 @@ const userSchema = new mongoose.Schema({
     averageAccuracy: { type: Number, default: 0 },
     lastSessionDate: Date,
   },
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
+  notes: {
+    type: String,
+    default: '',
+  },
   createdAt: {
     type: Date,
     default: Date.now,
