@@ -172,44 +172,167 @@ const StageSpelling = ({ word, onAnswer, soundEnabled, attempts }) => {
   );
 };
 
-/* Imitation — speak the word, use SpeechRecognition or confirm button */
-const StageImitation = ({ word, onAnswer, soundEnabled }) => {
-  const [phase, setPhase] = useState("listen"); // listen → record → done
-  const [transcript, setTranscript] = useState("");
-  const [listening, setListening] = useState(false);
-  const [supported] = useState(() => Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
+/* ── Imitation helpers ── */
+const levenshtein = (a, b) => {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+};
+const isClose = (spoken, target) => {
+  if (spoken === target) return false;
+  if (spoken.includes(target) || target.includes(spoken)) return true;
+  return levenshtein(spoken, target) <= 2;
+};
 
-  useEffect(() => { speak(word.word, soundEnabled); setPhase("listen"); setTranscript(""); }, [word]);
+const MAX_IMITATION_ATTEMPTS = 3;
+
+/* Imitation — multi-attempt speech recognition with skip */
+const StageImitation = ({ word, onAnswer, onSkip, soundEnabled }) => {
+  const [phase, setPhase] = useState("idle"); // idle | record | result
+  const [transcript, setTranscript] = useState("");
+  const [confidence, setConfidence] = useState(null);
+  const [listening, setListening] = useState(false);
+  const [attemptsDone, setAttemptsDone] = useState(0);
+  const [matchLevel, setMatchLevel] = useState(null); // "correct" | "close" | "wrong"
+  const [showSkipConfirm, setShowSkipConfirm] = useState(false);
+  const [supported] = useState(() => Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
+  const recRef = useRef(null);
+
+  useEffect(() => {
+    speak(word.word, soundEnabled);
+    setPhase("idle"); setTranscript(""); setConfidence(null);
+    setAttemptsDone(0); setMatchLevel(null); setShowSkipConfirm(false);
+    return () => { if (recRef.current) { try { recRef.current.abort(); } catch(_){} } };
+  }, [word]);
 
   const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
+    setPhase("record"); setListening(true);
     const rec = new SR();
+    recRef.current = rec;
     rec.lang = "en-US"; rec.continuous = false; rec.interimResults = false;
-    rec.onstart = () => setListening(true);
     rec.onresult = (e) => {
       const text = e.results[0][0].transcript.trim().toLowerCase();
-      setTranscript(text); setListening(false); setPhase("done");
-      onAnswer(text === word.word.toLowerCase(), text);
+      const conf = Math.round((e.results[0][0].confidence || 0) * 100);
+      const exact = text === word.word.toLowerCase();
+      const close = !exact && isClose(text, word.word.toLowerCase());
+      const level = exact ? "correct" : close ? "close" : "wrong";
+      const newAttempts = attemptsDone + 1;
+      setTranscript(text); setConfidence(conf);
+      setListening(false); setPhase("result");
+      setAttemptsDone(newAttempts); setMatchLevel(level);
+      if (exact || newAttempts >= MAX_IMITATION_ATTEMPTS) {
+        onAnswer(exact, text);
+      }
     };
-    rec.onerror = () => { setListening(false); setPhase("done"); onAnswer(false, ""); };
+    rec.onerror = () => {
+      const newAttempts = attemptsDone + 1;
+      setListening(false); setPhase("result");
+      setTranscript("(not detected)"); setMatchLevel("wrong");
+      setAttemptsDone(newAttempts);
+      if (newAttempts >= MAX_IMITATION_ATTEMPTS) onAnswer(false, "");
+    };
     rec.onend = () => setListening(false);
     rec.start();
   };
 
+  const tryAgain = () => {
+    speak(word.word, soundEnabled);
+    setPhase("idle"); setTranscript(""); setConfidence(null); setMatchLevel(null);
+  };
+
+  const attemptsLeft = MAX_IMITATION_ATTEMPTS - attemptsDone;
+  const isDone = matchLevel === "correct" || attemptsDone >= MAX_IMITATION_ATTEMPTS;
+
   return (
     <div className="stage-area">
-      <img src={word.imageUrl} alt={word.word} className="stage-main-image" onError={(e) => { e.currentTarget.src = "https://placehold.co/400x300?text=Image"; }} />
+      <img src={word.imageUrl} alt={word.word} className="stage-main-image"
+        onError={(e) => { e.currentTarget.src = "https://placehold.co/400x300?text=Image"; }} />
       <div className="recognition-word">{word.word}</div>
-      <div className="row-wrap center" style={{ gap: "0.6rem", marginTop: "0.8rem" }}>
-        <button className="btn btn-secondary" onClick={() => { speak(word.word, true); setPhase("record"); }}>🔊 Hear the Word</button>
-        {phase !== "listen" && (
-          supported
-            ? <button className={`btn ${listening ? "btn-danger" : "btn-primary"}`} onClick={startListening} disabled={listening}>{listening ? "🎙 Listening…" : "🎤 Say It!"}</button>
-            : <button className="btn btn-primary" onClick={() => { setPhase("done"); onAnswer(true, word.word); }}>✅ I Said It!</button>
-        )}
+
+      {/* Attempt dots */}
+      <div className="attempt-dots">
+        {Array.from({ length: MAX_IMITATION_ATTEMPTS }).map((_, i) => {
+          const isUsed = i < attemptsDone;
+          const isCurrent = i === attemptsDone && !isDone;
+          const wasCorrect = isUsed && matchLevel === "correct" && i === attemptsDone - 1;
+          return (
+            <div key={i}
+              className={`attempt-dot ${
+                wasCorrect ? "dot-correct" : isUsed ? "dot-used" : isCurrent ? "dot-current" : ""
+              }`}
+              title={`Attempt ${i + 1}`}
+            />
+          );
+        })}
       </div>
-      {transcript && <p className="stage-question" style={{ marginTop: "0.5rem" }}>You said: <strong>"{transcript}"</strong></p>}
+
+      {/* Phase: idle */}
+      {phase === "idle" && (
+        <div className="row-wrap center" style={{ gap: "0.7rem", marginTop: "0.5rem" }}>
+          <button className="btn btn-secondary" onClick={() => speak(word.word, true)}>🔊 Hear Again</button>
+          {supported
+            ? <button className="btn btn-primary" onClick={startListening}>🎤 Start Speaking</button>
+            : <button className="btn btn-primary" onClick={() => { setMatchLevel("correct"); onAnswer(true, word.word); }}>✅ I Said It!</button>
+          }
+        </div>
+      )}
+
+      {/* Phase: record */}
+      {phase === "record" && (
+        <div className="imitation-listening-zone">
+          <div className={`mic-ring ${listening ? "mic-active" : ""}`}>
+            <span className="mic-icon">🎙</span>
+          </div>
+          <p className="stage-question" style={{ marginTop: "0.6rem" }}>
+            {listening ? "Listening… say the word clearly!" : "Preparing microphone…"}
+          </p>
+        </div>
+      )}
+
+      {/* Phase: result */}
+      {phase === "result" && (
+        <div className="imitation-result">
+          <div className={`imitation-badge imitation-badge--${matchLevel}`}>
+            {matchLevel === "correct" ? "🎉 Perfect!" : matchLevel === "close" ? "👍 Almost there!" : "❌ Not quite"}
+          </div>
+          {transcript && (
+            <p className="stage-question">
+              You said: <strong>&ldquo;{transcript}&rdquo;</strong>
+              {confidence !== null && confidence > 0 &&
+                <span className="confidence-chip">{confidence}% confidence</span>}
+            </p>
+          )}
+          {!isDone && (
+            <div className="row-wrap center" style={{ gap: "0.6rem" }}>
+              <button className="btn btn-secondary" onClick={() => speak(word.word, true)}>🔊 Hear Again</button>
+              <button className="btn btn-primary" onClick={tryAgain}>
+                🔄 Try Again ({attemptsLeft} left)
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Skip area */}
+      {!isDone && phase !== "record" && !showSkipConfirm && (
+        <button className="btn btn-skip" onClick={() => setShowSkipConfirm(true)}>⏭ Skip this word</button>
+      )}
+      {showSkipConfirm && (
+        <div className="skip-confirm-box">
+          <p>Skip <strong>&ldquo;{word.word}&rdquo;</strong>? It will be marked as missed.</p>
+          <div className="row-wrap center" style={{ gap: "0.55rem" }}>
+            <button className="btn btn-ghost" onClick={() => setShowSkipConfirm(false)}>Cancel</button>
+            <button className="btn btn-danger" onClick={onSkip}>Yes, Skip ⏭</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -365,6 +488,37 @@ const LearningSessionPage = () => {
     setTimeout(advance, autoAdvance ? 600 : 1200);
   }, [sessionId, currentWord, currentStage, stats, streak, wordIndex, words.length, stageIndex, attemptCount, animationIntensity, autoAdvance, advance, awaitingNext]);
 
+  const handleSkip = useCallback(async () => {
+    if (!sessionId || !currentWord || awaitingNext) return;
+    setAwaitingNext(true);
+    const timeSpent = Math.max(1, Math.round((Date.now() - stageStartRef.current) / 1000));
+    setStats((s) => ({ correct: s.correct, total: s.total + 1 }));
+    setStreak(0);
+    setLastFeedback("incorrect");
+    const isLastWord = wordIndex === words.length - 1;
+    const isLastStage = stageIndex === STAGES.length - 1;
+    try {
+      await sessionApi.addResult(sessionId, {
+        stage: currentStage.id,
+        wordId: currentWord._id,
+        correct: false,
+        timeSpent,
+        attempts: attemptCount + 1,
+        animationLevel: animationIntensity,
+        spokenWord: "skipped",
+        targetWord: currentWord.word,
+      });
+      if (isLastStage && isLastWord) {
+        await sessionApi.complete(sessionId, {});
+        setFinished(true);
+        return;
+      }
+    } catch (err) {
+      setError(parseError(err, "Failed to save result"));
+    }
+    setTimeout(advance, 800);
+  }, [sessionId, currentWord, currentStage, wordIndex, words.length, stageIndex, attemptCount, animationIntensity, advance, awaitingNext]);
+
   const handlePresentationDone = useCallback(() => {
     if (!sessionId || !currentWord || awaitingNext) return;
     setAwaitingNext(true);
@@ -408,7 +562,7 @@ const LearningSessionPage = () => {
       case "image-mcq":    return <StageImageMCQ {...props} />;
       case "letter-tiles": return <StageLetterTiles {...props} />;
       case "spelling":     return <StageSpelling {...props} />;
-      case "imitation":    return <StageImitation {...props} />;
+      case "imitation":    return <StageImitation {...props} onSkip={handleSkip} />;
       case "elicitation":  return <StageElicitation {...props} />;
       default:             return null;
     }
