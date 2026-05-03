@@ -77,8 +77,11 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Registration error:', error);
-      res.status(500).json({ message: 'Server error during registration' });
+      console.error('Registration error details:', error);
+      res.status(500).json({ 
+        message: 'Server error during registration',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
     }
   }
 );
@@ -135,8 +138,11 @@ router.post(
         },
       });
     } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({ message: 'Server error during login' });
+      console.error('Login error details:', error);
+      res.status(500).json({ 
+        message: 'Server error during login',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+      });
     }
   }
 );

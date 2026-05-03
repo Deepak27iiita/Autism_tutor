@@ -2,12 +2,19 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
-
-// Load environment variables
 const path = require('path');
 
 // Load environment variables
 dotenv.config({ path: __dirname + '/.env' });
+
+// Validate critical environment variables
+const requiredEnv = ['MONGODB_URI', 'JWT_SECRET'];
+const missingEnv = requiredEnv.filter(env => !process.env[env]);
+
+if (missingEnv.length > 0 && process.env.NODE_ENV === 'production') {
+  console.error(`CRITICAL ERROR: Missing required environment variables: ${missingEnv.join(', ')}`);
+  console.error('Please set these in your Render Dashboard -> Environment tab.');
+}
 
 const app = express();
 
@@ -41,16 +48,22 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Database connection
+const dbUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/asd_tutor';
+console.log(`Attempting to connect to MongoDB...`);
+
 mongoose
-  .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/asd_tutor', {
+  .connect(dbUri, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
   .then(() => {
-    console.log(' MongoDB connected successfully');
+    console.log('✅ MongoDB connected successfully');
   })
   .catch((err) => {
-    console.error(' MongoDB connection error:', err);
+    console.error('❌ MongoDB connection error:', err.message);
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Make sure your IP is whitelisted in MongoDB Atlas (allow 0.0.0.0/0 for Render).');
+    }
   });
 
 const PORT = process.env.PORT || 5000;
