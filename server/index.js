@@ -68,7 +68,14 @@ mongoose
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(` Server running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err, promise) => {
+  console.error(`Error: ${err.message}`);
+  // If the error is fatal, you might want to close the server
+  // server.close(() => process.exit(1));
 });
 
