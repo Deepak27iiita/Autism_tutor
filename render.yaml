@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: asd-animated-tutor
+    env: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+        placeholder: "Your MongoDB Atlas connection string"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 30d
+      - key: CLIENT_URL
+        value: https://asd-animated-tutor.onrender.com # Change this if you use a custom domain

@@ -4,6 +4,9 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 
 // Load environment variables
+const path = require('path');
+
+// Load environment variables
 dotenv.config({ path: __dirname + '/.env' });
 
 const app = express();
@@ -26,6 +29,16 @@ app.use('/api/teacher', require('./routes/teacher'));
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'ASD Animated Tutor API is running' });
 });
+
+// Serve static assets in production
+if (process.env.NODE_ENV === 'production') {
+  // Set static folder
+  app.use(express.static(path.join(__dirname, '../client/build')));
+
+  app.get('*', (req, res) => {
+    res.sendFile(path.resolve(__dirname, '../client', 'build', 'index.html'));
+  });
+}
 
 // Database connection
 mongoose
